@@ -1,24 +1,28 @@
-import { Injectable } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { TypeOrmModuleOptions, TypeOrmOptionsFactory } from "@nestjs/typeorm";
-
+import { Injectable } from '@nestjs/common';
+import { TypeOrmModuleOptions, TypeOrmOptionsFactory } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
+import { Client } from '../client/client.entity'; // <--- Garanta que o caminho está certo (minúsculo)
 
 @Injectable()
 export class PgConfigService implements TypeOrmOptionsFactory {
-    constructor(private readonly configService: ConfigService){}
+  constructor(private configService: ConfigService) {}
 
-    createTypeOrmOptions(): TypeOrmModuleOptions{
-        return{
-            type: "postgres",
-            url: this.configService.get <string> ('DATABASE_URL'),
-            /* host: this.configService.get <string> ('PG_NEON_HOST'),
-            port: this.configService.get <number> ('PG_NEON_PORT'),
-            username: this.configService.get <string> ('PG_NEON_USERNAME'),
-            password: this.configService.get <string> ('PG_NEON_PASSWORD'),
-            database: this.configService.get <string> ('PG_NEON_DATABASE'), */
-            entities: [__dirname + '/../**/*.entity{.js,.ts}'],
-            synchronize: false,
-            ssl: true
-        }
-    }
+  createTypeOrmOptions(): TypeOrmModuleOptions {
+    // --- DEBUG: IMPRIMIR NO TERMINAL ---
+    const url = this.configService.get<string>('DATABASE_URL');
+    console.log('\n==================================================');
+    console.log('🔍 TENTANDO LER DO .ENV:', url ? 'URL ENCONTRADA ✅' : 'URL NÃO ENCONTRADA (UNDEFINED) ❌');
+    console.log('==================================================\n');
+    // -----------------------------------
+
+    return {
+      type: 'postgres',
+      url: url, // Usa a variável capturada
+      entities: [Client],
+      synchronize: true,
+      ssl: {
+        rejectUnauthorized: false,
+      },
+    };
+  }
 }

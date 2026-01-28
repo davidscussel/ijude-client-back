@@ -4,8 +4,7 @@ import { AppService } from './app.service';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { PgConfigService } from './config/pg.config.service';
-import { ClientModule } from './Client/client.module';
-
+import { ClientModule } from './client/client.module';
 
 @Module({
   imports: [
