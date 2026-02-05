@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Get } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param } from '@nestjs/common';
 import { ClientService } from './client.service';
 import { CreateClientDto } from './create-client-dto';
 
@@ -16,14 +16,37 @@ export class ClientController {
     return this.clientService.verifyCode(body.phone, body.code);
   }
 
-  // --- ROTA DE LOGIN NOVA ---
   @Post('login')
   login(@Body() body: { email: string; pass: string }) {
     return this.clientService.login(body.email, body.pass);
   }
 
-  @Get()
-  findAll() {
-    return this.clientService.findAll();
+  // --- NOVAS ROTAS DE ENDEREÇO ---
+
+  /**
+   * Endpoint: POST /client/address
+   * Usado pela AddressRegistrationPage no Flutter para salvar novos endereços
+   */
+  @Post('address')
+  async createAddress(@Body() addressData: any) {
+    return await this.clientService.saveAddress(addressData);
   }
+
+  /**
+   * Endpoint: GET /client/addresses/:clientId
+   * Usado para listar os endereços de um cliente específico na Home
+   */
+@Get('addresses/:clientId')
+async listAddresses(@Param('clientId') clientId: string) {
+  return await this.clientService.getAddressesByClient(clientId);
+}
+
+// -------------------------------
+
+@Get()
+findAll() {
+  return this.clientService.findAll();
+}
+
+
 }
