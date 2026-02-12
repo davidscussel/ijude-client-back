@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { MailerService } from '@nestjs-modules/mailer';
 import { Client } from './client.entity';
 import { Address } from './address.entity';
 import { CreateClientDto } from './create-client-dto';
@@ -19,6 +20,8 @@ export class ClientService {
 
     @InjectRepository(Address)
     private readonly addressRepository: Repository<Address>,
+
+    private readonly mailerService: MailerService, 
   ) {}
 
   // --- CADASTRO DE CLIENTE ---
@@ -41,31 +44,54 @@ export class ClientService {
 
     const savedClient = await this.clientRepository.save(newClient);
 
-    console.log('\n=============================================');
-    console.log(`📱 [NOVO CADASTRO] Para: ${savedClient.phone}`);
-    console.log(`🔑 CÓDIGO: ${code}`);
-    console.log('=============================================\n');
+    try {
+      await this.mailerService.sendMail({
+        to: savedClient.email,
+        subject: 'Bem-vindo ao iJude! Confirme seu cadastro 🛠️',
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; color: #0F172A;">
+            <h2>Olá, ${savedClient.name}!</h2>
+            <p>Ficamos felizes com seu cadastro. Use o código abaixo para verificar sua conta:</p>
+            <div style="background: #F1F5F9; padding: 20px; text-align: center; border-radius: 12px;">
+              <span style="font-size: 32px; font-weight: bold; letter-spacing: 4px; color: #2563EB;">${code}</span>
+            </div>
+          </div>
+        `,
+      });
+      console.log(`✅ Código enviado para: ${savedClient.email}`);
+    } catch (error) {
+      console.error('❌ Erro ao enviar e-mail:', error);
+    }
 
     return savedClient;
   }
 
-  // --- VERIFICAÇÃO DE SMS ---
-  async verifyCode(phone: string, code: string) {
-    const client = await this.clientRepository.findOne({ where: { phone } });
+  // --- VERIFICAÇÃO DE CÓDIGO (ATUALIZADO PARA RETORNAR USUÁRIO) ---
+  async verifyCode(email: string, code: string) {
+    const client = await this.clientRepository.findOne({ 
+      where: { email: email.trim().toLowerCase() } 
+    });
 
-    if (!client) throw new BadRequestException('Cliente não encontrado');
+    if (!client) {
+      console.log(`❌ Tentativa de verificação: e-mail ${email} não encontrado.`);
+      throw new BadRequestException('Cliente não encontrado');
+    }
 
     if (client.verification_code === code) {
       client.is_verified = true;
-      client.verification_code = null;
-      await this.clientRepository.save(client);
-      return { message: 'Conta verificada!' };
+      client.verification_code = null; 
+      const updatedClient = await this.clientRepository.save(client);
+
+      // RETORNO DE DADOS PARA LOGIN AUTOMÁTICO
+      // Removemos campos sensíveis antes de retornar para o Flutter
+      const { password, verification_code, ...result } = updatedClient;
+      return result; 
     } else {
       throw new BadRequestException('Código inválido!');
     }
   }
 
-  // --- LOGIN COM REENVIO DE SMS ---
+  // --- LOGIN ---
   async login(email: string, pass: string) {
     const client = await this.clientRepository.findOne({ where: { email } });
 
@@ -78,15 +104,20 @@ export class ClientService {
       client.verification_code = newCode;
       await this.clientRepository.save(client);
 
-      console.log('\n=============================================');
-      console.log(`⚠️ LOGIN BLOQUEADO: CONTA NÃO VERIFICADA`);
-      console.log(`🔑 NOVO CÓDIGO: ${newCode}`);
-      console.log('=============================================\n');
+      try {
+        await this.mailerService.sendMail({
+          to: client.email,
+          subject: 'Confirme sua identidade - iJude',
+          html: `<p>Sua conta ainda não foi verificada. Use o novo código: <b>${newCode}</b></p>`,
+        });
+      } catch (e) {
+        console.error('Erro no reenvio de e-mail:', e);
+      }
 
       throw new ForbiddenException({ 
-        message: 'Conta não verificada.', 
+        message: 'Conta não verificada. Enviamos um novo código para seu e-mail.', 
         needVerification: true, 
-        phone: client.phone 
+        email: client.email 
       });
     }
 
@@ -95,47 +126,21 @@ export class ClientService {
   }
 
   // --- GESTÃO DE ENDEREÇOS ---
-
-  /**
-   * Salva um novo endereço vinculado a um cliente específico.
-   * A tipagem foi ajustada para garantir que o TS reconheça o retorno único.
-   */
   async saveAddress(addressData: { clientId: string; [key: string]: any }): Promise<Address> {
     const { clientId, ...rest } = addressData;
-
     const client = await this.clientRepository.findOne({ where: { id: clientId } });
-    
-    if (!client) {
-      throw new NotFoundException('Cliente não encontrado para vincular o endereço.');
-    }
-
-    // Criamos a instância manualmente para garantir que as propriedades batam com a classe Address
-    const addressInstance = this.addressRepository.create({
-      label: rest.label,
-      street: rest.street,
-      number: rest.number,
-      zipCode: rest.zipCode,
-      neighborhood: rest.neighborhood,
-      city: rest.city,
-      complement: rest.complement,
-      client: client, 
-    });
-
-    // O retorno de save() agora satisfará a Promise<Address>
+    if (!client) throw new NotFoundException('Cliente não encontrado.');
+    const addressInstance = this.addressRepository.create({ ...rest, client: client });
     return await this.addressRepository.save(addressInstance);
   }
 
-  /**
-   * Retorna todos os endereços vinculados ao ID de um cliente específico
-   */
   async getAddressesByClient(clientId: string): Promise<Address[]> {
-  return await this.addressRepository.find({
-    where: { client: { id: clientId } }, 
-    order: { label: 'ASC' } 
-  });
-}
+    return await this.addressRepository.find({
+      where: { client: { id: clientId } }, 
+      order: { label: 'ASC' } 
+    });
+  }
 
-  // --- UTILITÁRIOS ---
   findAll() {
     return this.clientRepository.find();
   }

@@ -12,8 +12,8 @@ export class ClientController {
   }
 
   @Post('verify')
-  verify(@Body() body: { phone: string; code: string }) {
-    return this.clientService.verifyCode(body.phone, body.code);
+  async verify(@Body() body: { email: string; code: string }) {
+    return this.clientService.verifyCode(body.email, body.code);
   }
 
   @Post('login')
