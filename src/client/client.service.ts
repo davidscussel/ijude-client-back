@@ -22,7 +22,7 @@ export class ClientService {
     private readonly addressRepository: Repository<Address>,
   ) {}
 
-  // --- MÉTODO PRIVADO: ENVIO VIA API BREVO (HTTPS - PORTA 443) ---
+  // --- MÉTODO PRIVADO: ENVIO VIA API BREVO ---
   private async sendBrevoEmail(to: string, subject: string, htmlContent: string) {
     const apiKey = process.env.BREVO_API_KEY;
 
@@ -33,7 +33,7 @@ export class ClientService {
 
     try {
       await axios.post(
-        'https://api.brevo.com/v3/smtp/email', // URL oficial do Brevo
+        'https://api.brevo.com/v3/smtp/email',
         {
           sender: { name: 'iJude', email: 'cadastro@ijude.com.br' },
           to: [{ email: to }],
@@ -49,9 +49,30 @@ export class ClientService {
       );
       console.log(`✅ E-mail enviado com sucesso para: ${to}`);
     } catch (error) {
-      // Logamos o erro detalhado da API para facilitar o debug no Render
       console.error('❌ Erro na API do Brevo:', error.response?.data || error.message);
     }
+  }
+
+  /**
+   * --- NOVO MÉTODO: ACEITAR TERMOS (SOLUÇÃO DO LOOP) ---
+   * Este método altera o status no banco Neon de FALSE para TRUE.
+   */
+  async acceptTerms(id: string) {
+    const client = await this.clientRepository.findOne({ where: { id } });
+
+    if (!client) {
+      throw new NotFoundException('Cliente não encontrado.');
+    }
+
+    // Altera o estado do objeto
+    client.termsAccepted = true;
+
+    // Persiste a mudança no banco de dados Neon
+    const updatedClient = await this.clientRepository.save(client);
+
+    // Retorna o usuário atualizado sem dados sensíveis
+    const { password, verification_code, ...result } = updatedClient;
+    return result;
   }
 
   // --- CADASTRO DE CLIENTE ---
@@ -77,7 +98,6 @@ export class ClientService {
 
     const savedClient = await this.clientRepository.save(newClient);
 
-    // Dispara o e-mail após salvar no banco
     await this.sendBrevoEmail(
       savedClient.email,
       'Bem-vindo ao iJude! Confirme seu cadastro 🛠️',
