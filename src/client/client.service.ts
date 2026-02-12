@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { MailerService } from '@nestjs-modules/mailer';
+import axios from 'axios';
 import { Client } from './client.entity';
 import { Address } from './address.entity';
 import { CreateClientDto } from './create-client-dto';
@@ -20,14 +20,46 @@ export class ClientService {
 
     @InjectRepository(Address)
     private readonly addressRepository: Repository<Address>,
-
-    private readonly mailerService: MailerService, 
   ) {}
+
+  // --- MÉTODO PRIVADO: ENVIO VIA API BREVO (HTTPS - PORTA 443) ---
+  private async sendBrevoEmail(to: string, subject: string, htmlContent: string) {
+    const apiKey = process.env.BREVO_API_KEY;
+
+    if (!apiKey) {
+      console.error('❌ ERRO: BREVO_API_KEY não configurada no Render/Ambiente.');
+      return;
+    }
+
+    try {
+      await axios.post(
+        'https://api.brevo.com/v3/smtp/email', // URL oficial do Brevo
+        {
+          sender: { name: 'iJude', email: 'cadastro@ijude.com.br' },
+          to: [{ email: to }],
+          subject: subject,
+          htmlContent: htmlContent,
+        },
+        {
+          headers: {
+            'api-key': apiKey,
+            'content-type': 'application/json',
+          },
+        },
+      );
+      console.log(`✅ E-mail enviado com sucesso para: ${to}`);
+    } catch (error) {
+      // Logamos o erro detalhado da API para facilitar o debug no Render
+      console.error('❌ Erro na API do Brevo:', error.response?.data || error.message);
+    }
+  }
 
   // --- CADASTRO DE CLIENTE ---
   async create(createClientDto: CreateClientDto) {
+    const emailNormalized = createClientDto.email.trim().toLowerCase();
+
     const existingClient = await this.clientRepository.findOne({ 
-      where: { email: createClientDto.email } 
+      where: { email: emailNormalized } 
     });
     
     if (existingClient) {
@@ -38,42 +70,39 @@ export class ClientService {
 
     const newClient = this.clientRepository.create({
       ...createClientDto,
+      email: emailNormalized,
       verification_code: code,
       is_verified: false,
     });
 
     const savedClient = await this.clientRepository.save(newClient);
 
-    try {
-      await this.mailerService.sendMail({
-        to: savedClient.email,
-        subject: 'Bem-vindo ao iJude! Confirme seu cadastro 🛠️',
-        html: `
-          <div style="font-family: sans-serif; max-width: 600px; color: #0F172A;">
-            <h2>Olá, ${savedClient.name}!</h2>
-            <p>Ficamos felizes com seu cadastro. Use o código abaixo para verificar sua conta:</p>
-            <div style="background: #F1F5F9; padding: 20px; text-align: center; border-radius: 12px;">
-              <span style="font-size: 32px; font-weight: bold; letter-spacing: 4px; color: #2563EB;">${code}</span>
-            </div>
+    // Dispara o e-mail após salvar no banco
+    await this.sendBrevoEmail(
+      savedClient.email,
+      'Bem-vindo ao iJude! Confirme seu cadastro 🛠️',
+      `
+        <div style="font-family: sans-serif; max-width: 600px; color: #0F172A;">
+          <h2>Olá, ${savedClient.name}!</h2>
+          <p>Ficamos felizes com seu cadastro. Use o código abaixo para verificar sua conta:</p>
+          <div style="background: #F1F5F9; padding: 20px; text-align: center; border-radius: 12px; margin: 20px 0;">
+            <span style="font-size: 32px; font-weight: bold; letter-spacing: 4px; color: #2563EB;">${code}</span>
           </div>
-        `,
-      });
-      console.log(`✅ Código enviado para: ${savedClient.email}`);
-    } catch (error) {
-      console.error('❌ Erro ao enviar e-mail:', error);
-    }
+          <p>Se não foi você quem solicitou, apenas ignore este e-mail.</p>
+        </div>
+      `
+    );
 
     return savedClient;
   }
 
-  // --- VERIFICAÇÃO DE CÓDIGO (ATUALIZADO PARA RETORNAR USUÁRIO) ---
+  // --- VERIFICAÇÃO DE CÓDIGO ---
   async verifyCode(email: string, code: string) {
     const client = await this.clientRepository.findOne({ 
       where: { email: email.trim().toLowerCase() } 
     });
 
     if (!client) {
-      console.log(`❌ Tentativa de verificação: e-mail ${email} não encontrado.`);
       throw new BadRequestException('Cliente não encontrado');
     }
 
@@ -82,8 +111,6 @@ export class ClientService {
       client.verification_code = null; 
       const updatedClient = await this.clientRepository.save(client);
 
-      // RETORNO DE DADOS PARA LOGIN AUTOMÁTICO
-      // Removemos campos sensíveis antes de retornar para o Flutter
       const { password, verification_code, ...result } = updatedClient;
       return result; 
     } else {
@@ -93,7 +120,8 @@ export class ClientService {
 
   // --- LOGIN ---
   async login(email: string, pass: string) {
-    const client = await this.clientRepository.findOne({ where: { email } });
+    const emailNormalized = email.trim().toLowerCase();
+    const client = await this.clientRepository.findOne({ where: { email: emailNormalized } });
 
     if (!client || client.password !== pass) {
       throw new UnauthorizedException('E-mail ou senha incorretos.');
@@ -104,15 +132,11 @@ export class ClientService {
       client.verification_code = newCode;
       await this.clientRepository.save(client);
 
-      try {
-        await this.mailerService.sendMail({
-          to: client.email,
-          subject: 'Confirme sua identidade - iJude',
-          html: `<p>Sua conta ainda não foi verificada. Use o novo código: <b>${newCode}</b></p>`,
-        });
-      } catch (e) {
-        console.error('Erro no reenvio de e-mail:', e);
-      }
+      await this.sendBrevoEmail(
+        client.email,
+        'Confirme sua identidade - iJude',
+        `<p>Sua conta ainda não foi verificada no iJude. Use o código: <b>${newCode}</b></p>`
+      );
 
       throw new ForbiddenException({ 
         message: 'Conta não verificada. Enviamos um novo código para seu e-mail.', 
