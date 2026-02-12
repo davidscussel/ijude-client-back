@@ -32,6 +32,9 @@ export class Client {
   @Column({ default: false })
   is_verified: boolean;
 
+  @Column({ default: false })
+  termsAccepted: boolean;
+
   @CreateDateColumn()
   created_at: Date;
 }

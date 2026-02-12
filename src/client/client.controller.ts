@@ -48,5 +48,4 @@ findAll() {
   return this.clientService.findAll();
 }
 
-
 }
